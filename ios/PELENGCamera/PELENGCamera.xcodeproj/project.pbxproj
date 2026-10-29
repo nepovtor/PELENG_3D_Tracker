@@ -1,0 +1,31 @@
+// !$*UTF8*$!
+{
+ archiveVersion = 1;
+ classes = {};
+ objectVersion = 56;
+ objects = {
+  010101010101010101010101 = {isa = PBXProject; attributes = {LastUpgradeCheck = 1600; TargetAttributes = {020202020202020202020202 = {CreatedOnToolsVersion = 16.0; ProvisioningStyle = Automatic; }; }; }; buildConfigurationList = 101010101010101010101010; compatibilityVersion = "Xcode 14.0"; developmentRegion = en; hasScannedForEncodings = 0; knownRegions = (en, Base); mainGroup = 030303030303030303030303; productRefGroup = 040404040404040404040404; projectDirPath = ""; projectRoot = ""; targets = (020202020202020202020202); };
+  020202020202020202020202 = {isa = PBXNativeTarget; buildConfigurationList = 111111111111111111111111; buildPhases = (060606060606060606060606,070707070707070707070707,080808080808080808080808); buildRules = (); dependencies = (); name = PELENGCamera; productName = PELENGCamera; productReference = 090909090909090909090909; productType = "com.apple.product-type.application"; };
+  030303030303030303030303 = {isa = PBXGroup; children = (050505050505050505050505,040404040404040404040404); sourceTree = "<group>"; };
+  040404040404040404040404 = {isa = PBXGroup; children = (090909090909090909090909); name = Products; sourceTree = "<group>"; };
+  050505050505050505050505 = {isa = PBXGroup; children = (121212121212121212121212,131313131313131313131313,141414141414141414141414,151515151515151515151515); path = PELENGCamera; sourceTree = "<group>"; };
+  060606060606060606060606 = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (161616161616161616161616,171717171717171717171717,181818181818181818181818); runOnlyForDeploymentPostprocessing = 0; };
+  070707070707070707070707 = {isa = PBXFrameworksBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+  080808080808080808080808 = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+  090909090909090909090909 = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PELENGCamera.app; sourceTree = BUILT_PRODUCTS_DIR; };
+  121212121212121212121212 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PELENGCameraApp.swift; sourceTree = "<group>"; };
+  131313131313131313131313 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
+  141414141414141414141414 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraStreamer.swift; sourceTree = "<group>"; };
+  151515151515151515151515 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+  161616161616161616161616 = {isa = PBXBuildFile; fileRef = 121212121212121212121212; };
+  171717171717171717171717 = {isa = PBXBuildFile; fileRef = 131313131313131313131313; };
+  181818181818181818181818 = {isa = PBXBuildFile; fileRef = 141414141414141414141414; };
+  101010101010101010101010 = {isa = XCConfigurationList; buildConfigurations = (191919191919191919191919,202020202020202020202020); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+  111111111111111111111111 = {isa = XCConfigurationList; buildConfigurations = (212121212121212121212121,222222222222222222222222); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release; };
+  191919191919191919191919 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; GCC_C_LANGUAGE_STANDARD = gnu11; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 16.0; }; name = Debug; };
+  202020202020202020202020 = {isa = XCBuildConfiguration; buildSettings = {ALWAYS_SEARCH_USER_PATHS = NO; CLANG_ENABLE_MODULES = YES; CLANG_ENABLE_OBJC_ARC = YES; GCC_C_LANGUAGE_STANDARD = gnu11; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; IPHONEOS_DEPLOYMENT_TARGET = 16.0; }; name = Release; };
+		212121212121212121212121 = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = ""; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = PELENGCamera/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 16.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.nepovtor.pelengcamera; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1; SUPPORTS_MACCATALYST = NO; }; name = Debug; };
+		222222222222222222222222 = {isa = XCBuildConfiguration; buildSettings = {ASSETCATALOG_COMPILER_APPICON_NAME = ""; CODE_SIGN_STYLE = Automatic; CURRENT_PROJECT_VERSION = 1; GENERATE_INFOPLIST_FILE = NO; INFOPLIST_FILE = PELENGCamera/Info.plist; IPHONEOS_DEPLOYMENT_TARGET = 16.0; LD_RUNPATH_SEARCH_PATHS = ("$(inherited)", "@executable_path/Frameworks"); MARKETING_VERSION = 1.0; PRODUCT_BUNDLE_IDENTIFIER = com.nepovtor.pelengcamera; PRODUCT_NAME = "$(TARGET_NAME)"; SDKROOT = iphoneos; SWIFT_VERSION = 5.0; TARGETED_DEVICE_FAMILY = 1; SUPPORTS_MACCATALYST = NO; }; name = Release; };
+ };
+ rootObject = 010101010101010101010101;
+}

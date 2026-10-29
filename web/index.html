@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="ru" data-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>PELENG / 3D Tracker</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="ambient ambient-a"></div><div class="ambient ambient-b"></div><div class="ambient ambient-c"></div>
+  <div class="app-frame">
+    <header class="topbar">
+      <a class="brand" href="#overview" aria-label="PELENG 3D Tracker"><span class="brand-mark"><i></i><i></i></span><span><strong>PELENG</strong><small>3D tracker</small></span></a>
+      <nav class="nav" aria-label="Разделы"><a class="active" href="#overview">Обзор</a><a href="#calibration">Калибровка</a><a href="#sessions">Сеансы</a></nav>
+      <div class="top-actions"><span id="systemStatus" class="status"><i></i>Подключение</span><button id="themeToggle" class="icon-button" type="button" aria-label="Переключить тему"><span class="theme-glyph" aria-hidden="true"></span></button></div>
+    </header>
+    <main class="workspace" id="overview">
+      <section class="page-heading"><div><p class="context">MacBook + iPhone · локальная обработка</p><h1>Пространственное отслеживание</h1><p>Два реальных видеопотока, синхронизация и координаты в метрах.</p></div><div class="heading-actions"><span class="freshness">Обновление в реальном времени</span><button class="primary" id="recordStart">Начать запись</button></div></section>
+      <section class="readiness glass-panel" aria-label="Готовность системы">
+        <div><span>MacBook</span><strong id="macFps">—</strong><small id="macChip" class="state">Ожидание</small></div>
+        <div><span>iPhone</span><strong id="iphoneFps">—</strong><small id="iphoneChip" class="state">Ожидание</small></div>
+        <div><span>Синхронизация</span><strong id="sync">—</strong><small>ошибка пары</small></div>
+        <div><span>Калибровка</span><strong id="rms">—</strong><small id="calibstat">Профиль не активен</small></div>
+      </section>
+      <section class="camera-grid" aria-label="Живые камеры">
+        <article class="camera-card glass-panel"><header><div><span>Камера 01</span><h2>MacBook</h2></div><b>640 × 480</b></header><div class="view"><img id="macPreview" alt="Живое изображение камеры MacBook"><div class="reticle"></div><span id="macOffline" class="offline-note">Нет кадра с камеры</span><span class="view-label">Локальный поток</span></div></article>
+        <article class="camera-card glass-panel"><header><div><span>Камера 02</span><h2>iPhone</h2></div><b>Wi-Fi</b></header><div class="view"><img id="iphonePreview" alt="Живое изображение камеры iPhone"><div class="reticle"></div><span id="iphoneOffline" class="offline-note">Нет кадра с камеры</span><span class="view-label">Удалённый поток</span></div></article>
+      </section>
+      <section class="content-grid">
+        <article class="trajectory glass-panel"><header class="panel-heading"><div><span>Результат измерения</span><h2>Траектория XYZ</h2></div><span id="measureTag" class="measurement-tag">Нет измерений</span></header><div class="coordinate-strip"><div><span>X <small>м</small></span><strong id="x">—</strong></div><div><span>Y <small>м</small></span><strong id="y">—</strong></div><div class="lead"><span>Z <small>м</small></span><strong id="z">—</strong></div><div><span>Ошибка <small>px</small></span><strong id="errorPx">—</strong></div></div><div class="plot"><canvas id="plot"></canvas><div class="plot-placeholder" id="plotEmpty">Покажи зелёный круглый маркер обеим камерам</div></div></article>
+        <aside class="control-stack">
+          <article class="glass-panel connection"><header class="panel-heading"><div><span>Подключение</span><h2>iPhone sensor</h2></div><span class="step">01</span></header><label>Адрес Mac</label><div class="copy-field"><code id="address">Определяется…</code></div><label>PIN сеанса</label><div class="pin" id="pin">••••••</div><p>Видео остаётся в локальной сети и не отправляется в облако.</p></article>
+          <article class="glass-panel quality"><header class="panel-heading"><div><span>Качество</span><h2>Стереопара</h2></div><span class="step">02</span></header><dl><div><dt>Сопоставлено</dt><dd id="matched">0</dd></div><div><dt>Отклонено</dt><dd id="dropped">0</dd></div><div><dt>Часы ±</dt><dd id="uncertainty">—</dd></div><div><dt>База</dt><dd id="baseline">—</dd></div></dl></article>
+        </aside>
+      </section>
+      <section id="calibration" class="operations-grid">
+        <article class="glass-panel operation-card calibration-card"><header class="panel-heading"><div><span>Мастер настройки</span><h2>Стереокалибровка</h2></div><span class="pair-badge"><strong id="pairCount">0</strong> / 12</span></header><p>Зафиксируй камеры. Перемещай только жёсткую плоскую доску 9 × 6 и сохраняй разные ракурсы.</p><div class="form-row"><label for="square">Клетка, м</label><input id="square" type="number" min="0.005" max="0.100" step="0.001" value="0.025"></div><div class="button-row"><button class="primary" id="capture">Сохранить пару</button><button class="secondary" id="calibrate">Рассчитать</button><button class="tertiary danger" id="reset">Очистить</button></div><a class="text-link" href="/static/checkerboard.svg" target="_blank" rel="noopener">Открыть доску для печати ↗</a></article>
+        <article class="glass-panel operation-card"><header class="panel-heading"><div><span>Объект</span><h2>Зелёный маркер</h2></div><span class="step">03</span></header><p>Настрой диапазон HSV, если прицел не появляется на круглом объекте в обоих кадрах.</p><div class="field-grid"><label>H min<input type="number" id="hMin" value="35" min="0" max="179"></label><label>H max<input type="number" id="hMax" value="90" min="0" max="179"></label><label>S min<input type="number" id="sMin" value="80" min="0" max="255"></label><label>V min<input type="number" id="vMin" value="70" min="0" max="255"></label></div><button class="secondary full" id="saveHSV">Применить пороги</button></article>
+      </section>
+      <section id="sessions" class="glass-panel sessions"><header class="panel-heading"><div><span>Локальные данные</span><h2>Сеансы и экспорт</h2></div><span id="recCount" class="sample-count">0 точек</span></header><div class="session-actions"><button class="secondary" id="recordStop">Завершить и сохранить CSV</button><p>Записываются только прошедшие проверку 3D-координаты.</p></div><div id="history" class="history">Записей пока нет.</div></section>
+    </main>
+  </div>
+  <div id="toast" class="toast" role="alert" aria-live="polite"></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>

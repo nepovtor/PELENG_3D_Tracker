@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.taste-skill/
+.coverage
+*.log
+*.pyc
+.DS_Store
+build/
+DerivedData/
+*.xcuserstate
+*.xcuserdata/
+*.mobileprovision
+*.p12
+*.key
+*.pem
+data/
