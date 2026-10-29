@@ -24,20 +24,24 @@ def preflight_macos_camera(camera_index: int) -> None:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="PELENG: real MacBook/iPhone stereo tracker")
+    parser = argparse.ArgumentParser(description="PELENG: real multi-camera stereo tracker")
     parser.add_argument("serve", nargs="?", default="serve", choices=["serve"])
-    parser.add_argument("--camera", type=int, default=0, help="macOS camera index (0 = built-in on most Macs)")
+    parser.add_argument("--camera", type=int, action="append", dest="cameras",
+                        help="camera index; repeat for local stereo, e.g. --camera 1 --camera 2")
     parser.add_argument("--port", type=int, default=8765)
     parser.add_argument("--data", type=Path, default=Path.home()/"Documents"/"PELENG3D")
     args = parser.parse_args()
-    preflight_macos_camera(args.camera)
-    engine = Engine(args.data, args.camera)
+    cameras = args.cameras or [0]
+    for camera in cameras:
+        preflight_macos_camera(camera)
+    engine = Engine(args.data, cameras)
     print("\n========================================", flush=True)
     print(" PELENG 3D — actual cameras only", flush=True)
     print(" Mac dashboard: http://127.0.0.1:%d" % args.port, flush=True)
     print(" iPhone Mac address: http://%s:%d" % (local_ip(),args.port), flush=True)
     print(" Pairing PIN: %s" % engine.pin, flush=True)
     print(" Recordings: %s" % args.data, flush=True)
+    print(" Camera mode: %s" % ("local indexes " + ", ".join(map(str, cameras)) if len(cameras) > 1 else "Mac + iPhone"), flush=True)
     print("========================================\n", flush=True)
     uvicorn.run(build_app(engine), host="0.0.0.0", port=args.port, log_level="warning")
 

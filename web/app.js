@@ -22,6 +22,14 @@ function chip(id,live){$(id).textContent=live?'В ЭФИРЕ':'НЕТ СИГНА
 async function refresh(){
  try{
   const s=await api('/api/dashboard');lastState=s;
+  const localMulti=s.capture_mode==='local-multicamera';
+  setText('captureContext',localMulti?'Mac · несколько USB/UVC-камер · локальная обработка':'MacBook + iPhone · локальная обработка');
+  const second=(s.sources||[])[1];
+  setText('secondSourceLabel',localMulti?(second?.label||'Камера 02'):'iPhone');
+  setText('secondCameraTitle',localMulti?(second?.label||'USB camera'):'iPhone');
+  setText('secondCameraTransport',localMulti?'USB / UVC':'Wi-Fi');
+  setText('secondCameraKind',localMulti?'Локальный поток':'Удалённый поток');
+  renderSources(s.sources||[]);
   chip('macChip',s.mac_online);chip('iphoneChip',s.iphone_online);
   const ready=s.mac_online&&s.iphone_online;
   setSystemStatus(ready?'Две камеры в эфире':'Ожидание камер',ready);
@@ -34,12 +42,19 @@ async function refresh(){
   setText('calibstat',s.calibrated?`Профиль активен · RMS ${number(s.calibration_rms_px,' px')}`:'Калибровка не готова для текущей пары камер');
   const v=s.measurement;
   for(const [id,key] of [['x','x_m'],['y','y_m'],['z','z_m'],['errorPx','reprojection_error_px']])setText(id,v?number(v[key]):'—');
-  setText('measureTag',v?'ПОЗИЦИЯ ПОЛУЧЕНА':!s.mac_online?(s.mac_error||'Нет Mac-камеры'):!s.iphone_online?'Ожидание iPhone':s.error||'НЕТ ИЗМЕРЕНИЙ');$('measureTag').classList.toggle('valid',!!v);
+  setText('measureTag',v?'ПОЗИЦИЯ ПОЛУЧЕНА':!s.mac_online?(s.mac_error||'Нет первой камеры'):!s.iphone_online?(localMulti?'Ожидание второй камеры':'Ожидание iPhone'):s.error||'НЕТ ИЗМЕРЕНИЙ');$('measureTag').classList.toggle('valid',!!v);
   $('recordStart').disabled=!s.calibrated||s.recording;$('recordStop').disabled=!s.recording;
   $('recordStart').textContent=s.recording?'Запись идёт':'Начать запись';
   draw(s.path||[]);
   if(lastRecord!==s.recording){lastRecord=s.recording;loadHistory();}
  }catch(e){setSystemStatus('Сервер недоступен');}
+}
+function renderSources(sources){
+ const list=$('sourceList');setText('sourceCount',String(sources.length));list.innerHTML='';
+ if(!sources.length){list.textContent='Локальные камеры не настроены.';return;}
+ for(const source of sources){const item=document.createElement('div');item.className='source-item'+(source.online?' online':'');
+  item.innerHTML='<i></i><div><strong></strong><small></small></div><b></b>';
+  item.querySelector('strong').textContent=source.label;item.querySelector('small').textContent=`Индекс ${source.index} · ${source.online?'в эфире':source.error||'нет сигнала'}`;item.querySelector('b').textContent=number(source.fps,' FPS',1);list.appendChild(item);}
 }
 function refreshImages(){const time=Date.now();for(const id of ['mac','iphone']){const image=$(id+'Preview'),online=lastState&&lastState[id+'_online'];$(id+'Offline').style.display=online?'none':'block';if(online)image.src='/api/preview/'+id+'?t='+time;else{image.removeAttribute('src');image.style.opacity='0';}}}
 async function loadHistory(){try{const files=await api('/api/history');const text=JSON.stringify(files);if(lastHistory===text)return;lastHistory=text;
@@ -53,6 +68,11 @@ $('reset').onclick=()=>{if(!confirm('Удалить все сохранённы�
 $('recordStart').onclick=()=>postClick($('recordStart'),async()=>{await api('/api/record/start',{});return 'Запись началась. Будут сохранены только измеренные 3D-точки.';});
 $('recordStop').onclick=()=>postClick($('recordStop'),async()=>{const r=await api('/api/record/stop',{});await loadHistory();return `Сеанс сохранён: ${r.filename}`;});
 $('saveHSV').onclick=()=>postClick($('saveHSV'),async()=>{const r=await api('/api/marker',{lower:[Number($('hMin').value),Number($('sMin').value),Number($('vMin').value)],upper:[Number($('hMax').value),255,255]});return 'HSV пороги обновлены: '+r.lower.join(',');});
+const savedProfile=JSON.parse(localStorage.getItem('peleng-profile')||'null');
+if(savedProfile){$('operatorName').value=savedProfile.name||'Оператор PELENG';$('operatorRole').value=savedProfile.role||'Оператор';setText('profileName',$('operatorName').value);setText('avatar',($('operatorName').value.trim()[0]||'P').toUpperCase());}
+$('saveProfile').onclick=()=>{const name=$('operatorName').value.trim()||'Оператор PELENG',role=$('operatorRole').value;localStorage.setItem('peleng-profile',JSON.stringify({name,role}));setText('profileName',name);setText('avatar',(name[0]||'P').toUpperCase());toast('Профиль сохранён локально');};
+const sections=[...document.querySelectorAll('#overview,#cameras,#calibration,#sessions,#profile')];
+addEventListener('scroll',()=>{let current='overview';for(const section of sections)if(section.getBoundingClientRect().top<150)current=section.id;for(const link of document.querySelectorAll('.nav a'))link.classList.toggle('active',link.getAttribute('href')==='#'+current);},{passive:true});
 function draw(points){
  const canvas=$('plot'),ctx=canvas.getContext('2d');const rect=canvas.getBoundingClientRect();const dpr=window.devicePixelRatio||1;
  if(canvas.width!==Math.round(rect.width*dpr)||canvas.height!==Math.round(rect.height*dpr)){canvas.width=Math.round(rect.width*dpr);canvas.height=Math.round(rect.height*dpr);}ctx.setTransform(dpr,0,0,dpr,0,0);

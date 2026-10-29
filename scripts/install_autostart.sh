@@ -8,6 +8,7 @@ RUNNER="$SCRIPT_DIR/run_server.sh"
 PLIST="$HOME/Library/LaunchAgents/$LABEL.plist"
 LOG_DIR="$HOME/Library/Logs/PELENG3D"
 DOMAIN="gui/$(id -u)"
+CAMERA_INDEXES=${PELENG_CAMERA_INDEXES:-0}
 
 if [[ ! -x "$PROJECT_DIR/.venv/bin/python" ]]; then
   print -u2 "PELENG: .venv is not ready. Run scripts/start_mac.command once."
@@ -48,8 +49,8 @@ cat > "$PLIST" <<PLIST
   <dict>
     <key>PYTHONUNBUFFERED</key>
     <string>1</string>
-    <key>PELENG_CAMERA_INDEX</key>
-    <string>0</string>
+    <key>PELENG_CAMERA_INDEXES</key>
+    <string>$CAMERA_INDEXES</string>
     <key>PELENG_SERVER_PORT</key>
     <string>8765</string>
     <key>PELENG_DATA_DIR</key>

@@ -97,6 +97,25 @@ def test_http_pairing_and_one_generated_frame(tmp_path):
         assert client.get('/api/history').json()==[]
 
 
+def test_local_multicamera_mode_and_authenticated_monitor(tmp_path):
+    engine = Engine(tmp_path, [1, 2, 3])
+    app = build_app(engine, start_camera=False)
+    with TestClient(app) as client:
+        dashboard = client.get('/api/dashboard').json()
+        assert dashboard['capture_mode'] == 'local-multicamera'
+        assert dashboard['active_pair'] == ['uvc:1', 'uvc:2']
+        assert [source['index'] for source in dashboard['sources']] == [1, 2, 3]
+        assert client.get('/api/monitor/dashboard').status_code == 401
+        assert client.post('/api/monitor/pair', json={'pin': 'wrong'}).status_code == 403
+        paired = client.post('/api/monitor/pair', json={'pin': engine.pin})
+        assert paired.status_code == 200
+        headers = {'X-Monitor-Token': paired.json()['token']}
+        monitored = client.get('/api/monitor/dashboard', headers=headers)
+        assert monitored.status_code == 200
+        assert monitored.json()['capture_mode'] == 'local-multicamera'
+        assert client.post('/api/monitor/record/start', headers=headers).status_code == 409
+
+
 def test_synthetic_end_to_end_measurement_after_calibration_profile(tmp_path):
     """Synthetic fixture exercises HTTP -> synchronization -> detector -> triangulation -> CSV."""
     from peleng3d.geometry import StereoProfile, SIZE

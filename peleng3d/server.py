@@ -59,8 +59,13 @@ def local_ip() -> str:
 
 
 class MacCamera:
-    def __init__(self, index: int = 0):
+    """OpenCV/AVFoundation camera source with a stable local identity."""
+
+    def __init__(self, index: int = 0, on_frame=None):
         self.index = index
+        self.source_id = f"uvc:{index}"
+        self.label = "MacBook" if index == 0 else f"USB camera {index}"
+        self.on_frame = on_frame
         self.running = False
         self.thread: threading.Thread | None = None
         self.error = "Camera not started"
@@ -105,7 +110,8 @@ class MacCamera:
                 frame = crop_resize(frame)
                 with self.lock:
                     self.seq += 1
-                    self.matcher.add(TimedFrame(self.seq, stamp, frame))
+                    timed = TimedFrame(self.seq, stamp, frame)
+                    self.matcher.add(timed)
                     self.latest_frame = frame
                     self.latest_time = stamp
                     self.error = ""
@@ -114,19 +120,30 @@ class MacCamera:
                     if elapsed >= 1:
                         self.fps = count / elapsed
                         count, window_start = 0, stamp
+                if self.on_frame is not None:
+                    self.on_frame(self, timed)
         finally:
             cap.release()
 
 
 class Engine:
-    def __init__(self, data_dir: Path, camera_index: int = 0):
-        self.camera = MacCamera(camera_index)
+    def __init__(self, data_dir: Path, camera_index: int | list[int] | tuple[int, ...] = 0):
+        indexes = [camera_index] if isinstance(camera_index, int) else list(camera_index)
+        if not indexes:
+            raise ValueError("At least one camera index is required")
+        if len(set(indexes)) != len(indexes):
+            raise ValueError("Camera indexes must be unique")
+        self.camera = MacCamera(indexes[0])
+        self.local_cameras = [self.camera] + [MacCamera(index, self._receive_local_frame) for index in indexes[1:]]
+        self.local_stereo = len(self.local_cameras) >= 2
+        self.active_pair = (self.local_cameras[0], self.local_cameras[1]) if self.local_stereo else None
         self.store = CaptureStore(data_dir)
         self.lock = threading.RLock()
         self.pin = f"{secrets.randbelow(1000000):06d}"
         self.token: str | None = None
-        self.device: str | None = None
-        self.device_mode: str | None = None
+        self.monitor_tokens: dict[str, float] = {}
+        self.device: str | None = self.local_cameras[1].source_id if self.local_stereo else None
+        self.device_mode: str | None = "local-uvc-640x480-v1" if self.local_stereo else None
         self.last_iphone_time = 0.0
         self.last_iphone_seq = -1
         self.bad_pair_attempts: deque[float] = deque()
@@ -146,7 +163,28 @@ class Engine:
         self.path: deque[list[float]] = deque(maxlen=2000)
         self.hsv_lo = (35, 80, 70)
         self.hsv_hi = (90, 255, 255)
-        self.current_error = "Waiting for phone connection"
+        self.current_error = "Waiting for local stereo pair" if self.local_stereo else "Waiting for phone connection"
+
+    def start_sources(self) -> None:
+        for source in self.local_cameras:
+            source.start()
+
+    def stop_sources(self) -> None:
+        for source in self.local_cameras:
+            source.stop()
+
+    def _receive_local_frame(self, source: MacCamera, frame: TimedFrame[np.ndarray]) -> None:
+        if not self.active_pair or source is not self.active_pair[1]:
+            return
+        with self.active_pair[0].lock:
+            match = self.active_pair[0].matcher.match(frame.timestamp, 0.012)
+        if match is None:
+            with self.lock:
+                self.dropped_pairs += 1
+                self.current_error = "No synchronized local camera pair"
+            return
+        chosen, delta_s = match
+        self._process_pair(chosen.value, frame.value, frame.timestamp, delta_s, 0.0)
 
     def status(self) -> dict:
         now = time.monotonic()
@@ -155,9 +193,16 @@ class Engine:
             mac_error = self.camera.error
             mac_fps = round(self.camera.fps, 1)
         with self.lock:
-            phone_online = now - self.last_iphone_time < 3
+            phone_online = (self.local_stereo and self.local_cameras[1].latest_frame is not None and
+                            now - self.local_cameras[1].latest_time < 2) or now - self.last_iphone_time < 3
+            source_states = []
+            for source in self.local_cameras:
+                with source.lock:
+                    source_states.append({"id": source.source_id, "index": source.index, "label": source.label,
+                                          "online": source.latest_frame is not None and now-source.latest_time < 2,
+                                          "fps": round(source.fps, 1), "error": source.error})
             measurement = self.last_measurement if self.last_measurement and now - self.last_measurement["arrival_monotonic"] < 3 else None
-            return {"mac_online": mac_online, "mac_error": mac_error, "mac_fps": mac_fps,
+            result = {"mac_online": mac_online, "mac_error": mac_error, "mac_fps": mac_fps,
                     "iphone_online": phone_online, "iphone_fps": round(self.remote_fps, 1) if phone_online else 0,
                     "device_id": self.device if phone_online else None,
                     "calibration_pairs": self.calibration_pairs,
@@ -174,6 +219,14 @@ class Engine:
                     "error": self.current_error,
                     "marker_hsv_lower": list(self.hsv_lo), "marker_hsv_upper": list(self.hsv_hi),
                     "iphone_mode": self.device_mode if phone_online else None}
+            result["sources"] = source_states
+            result["capture_mode"] = "local-multicamera" if self.local_stereo else "mac-iphone"
+            result["active_pair"] = [s.source_id for s in self.active_pair] if self.active_pair else [self.camera.source_id, "iphone"]
+            if self.local_stereo:
+                result["iphone_fps"] = source_states[1]["fps"] if source_states[1]["online"] else 0
+                result["device_id"] = self.device
+                result["clock_uncertainty_ms"] = 0.0 if phone_online else None
+            return result
 
     def _profile_matches(self) -> bool:
         return (self.profile is not None and self.profile.size == SIZE and
@@ -182,6 +235,8 @@ class Engine:
                 self.profile.iphone_camera_mode == self.device_mode)
 
     def pair(self, pin: str, device_id: str, mode: str) -> str:
+        if self.local_stereo:
+            raise HTTPException(409, "Local camera pair is active; use monitor pairing on iPhone")
         now = time.monotonic()
         with self.lock:
             while self.bad_pair_attempts and self.bad_pair_attempts[0] < now - 60:
@@ -240,15 +295,22 @@ class Engine:
                 self.current_error = "No synchronized frame pair (clock uncertainty or latency too high)"
                 return
             chosen, delta_s = match
+        self._process_pair(chosen.value, frame, stamp_mac, delta_s, uncertainty)
+
+    def _process_pair(self, first: np.ndarray, second: np.ndarray, stamp_mac: float,
+                      delta_s: float, uncertainty: float) -> None:
+        arrival = time.monotonic()
+        with self.lock:
             self.sync_error_ms = delta_s * 1000
-            self.latest_pair = (chosen.value.copy(), frame.copy(), arrival)
+            self.uncertainty_ms = uncertainty * 1000
+            self.latest_pair = (first.copy(), second.copy(), arrival)
             self.last_pair_at = arrival
             self.matched_pairs += 1
             self.current_error = "Calibration required" if not self._profile_matches() else "Tracking marker"
             lo, hi = self.hsv_lo, self.hsv_hi
             profile = self.profile if self._profile_matches() else None
-        m1 = green_marker(chosen.value, lo, hi)
-        m2 = green_marker(frame, lo, hi)
+        m1 = green_marker(first, lo, hi)
+        m2 = green_marker(second, lo, hi)
         with self.lock:
             self.last_detection = {"mac": [m1.x, m1.y] if m1 else None,
                                    "iphone": [m2.x, m2.y] if m2 else None}
@@ -278,8 +340,20 @@ class Engine:
             with self.camera.lock:
                 frame = None if self.camera.latest_frame is None or time.monotonic()-self.camera.latest_time>2 else self.camera.latest_frame.copy()
         elif camera == "iphone":
-            with self.lock:
-                frame = None if self.remote_frame is None or time.monotonic()-self.last_iphone_time>3 else self.remote_frame.copy()
+            if self.local_stereo:
+                source = self.local_cameras[1]
+                with source.lock:
+                    frame = None if source.latest_frame is None or time.monotonic()-source.latest_time>2 else source.latest_frame.copy()
+            else:
+                with self.lock:
+                    frame = None if self.remote_frame is None or time.monotonic()-self.last_iphone_time>3 else self.remote_frame.copy()
+        elif camera.startswith("local-") and camera[6:].isdigit():
+            index = int(camera[6:])
+            source = next((item for item in self.local_cameras if item.index == index), None)
+            if source is None:
+                return None
+            with source.lock:
+                frame = None if source.latest_frame is None or time.monotonic()-source.latest_time>2 else source.latest_frame.copy()
         else:
             return None
         if frame is None:
@@ -323,7 +397,7 @@ class Engine:
             raise ValueError("Square size must be between 5 and 100 mm")
         with self.lock:
             if not self.device or not self.device_mode:
-                raise ValueError("Pair iPhone first")
+                raise ValueError("Connect the second camera first")
             device, mode = self.device, self.device_mode
         p = calibrate_stereo(self.store.load_pairs(), square_m, self.camera.index, device, mode)
         with self.lock:
@@ -338,9 +412,9 @@ def build_app(engine: Engine, *, start_camera: bool = True) -> FastAPI:
     @asynccontextmanager
     async def lifecycle(_: FastAPI):
         if start_camera:
-            engine.camera.start()
+            engine.start_sources()
         yield
-        engine.camera.stop()
+        engine.stop_sources()
 
     app = FastAPI(title="PELENG local camera engine", docs_url=None, redoc_url=None, lifespan=lifecycle)
     app.state.engine = engine
@@ -349,6 +423,14 @@ def build_app(engine: Engine, *, start_camera: bool = True) -> FastAPI:
         host = request.client.host if request.client else ""
         if not is_loopback(host) and host != "testclient":
             raise HTTPException(403, "Mac dashboard is restricted to localhost")
+
+    def require_monitor(request: Request):
+        token = request.headers.get("X-Monitor-Token", "")
+        with engine.lock:
+            expires = engine.monitor_tokens.get(token, 0)
+            if expires <= time.monotonic():
+                engine.monitor_tokens.pop(token, None)
+                raise HTTPException(401, "Monitor session expired; pair again")
 
     @app.get("/api/health")
     def health():
@@ -363,6 +445,52 @@ def build_app(engine: Engine, *, start_camera: bool = True) -> FastAPI:
             raise HTTPException(400, "Invalid device identity")
         token = engine.pair(data["pin"], data["device_id"], data["camera_mode"])
         return {"token": token, "protocol": 1, "frame_size": [640, 480]}
+
+    @app.post("/api/monitor/pair")
+    async def monitor_pair(request: Request):
+        data = await request.json()
+        pin = data.get("pin") if isinstance(data, dict) else None
+        if not isinstance(pin, str) or not secrets.compare_digest(pin, engine.pin):
+            raise HTTPException(403, "Pairing code incorrect")
+        token = secrets.token_urlsafe(32)
+        with engine.lock:
+            engine.monitor_tokens[token] = time.monotonic() + 24 * 60 * 60
+        return {"token": token, "protocol": 1, "mode": "monitor"}
+
+    @app.get("/api/monitor/dashboard")
+    def monitor_dashboard(request: Request):
+        require_monitor(request)
+        return engine.status()
+
+    @app.get("/api/monitor/preview/{camera}")
+    def monitor_preview(camera: str, request: Request):
+        require_monitor(request)
+        pic = engine.preview(camera)
+        if pic is None:
+            return Response(status_code=204)
+        return Response(content=pic, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+    @app.post("/api/monitor/record/{action}")
+    def monitor_record(action: str, request: Request):
+        require_monitor(request)
+        if action == "start":
+            if not engine._profile_matches():
+                raise HTTPException(409, "Valid calibration is required before recording")
+            try:
+                return {"session_id": engine.store.start()}
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
+        if action == "stop":
+            try:
+                return {"filename": engine.store.stop().name}
+            except ValueError as exc:
+                raise HTTPException(409, str(exc)) from exc
+        raise HTTPException(404, "Unknown recording action")
+
+    @app.get("/api/monitor/history")
+    def monitor_history(request: Request):
+        require_monitor(request)
+        return engine.store.history()
 
     @app.get("/api/time")
     def device_clock(request: Request):

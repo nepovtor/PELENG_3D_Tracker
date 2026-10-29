@@ -1,6 +1,88 @@
 import SwiftUI
 import AVFoundation
 
+@MainActor
+final class MonitorClient: ObservableObject {
+    struct Source: Decodable, Identifiable {
+        let id: String
+        let label: String
+        let online: Bool
+        let fps: Double
+    }
+    struct Measurement: Decodable { let x_m: Double; let y_m: Double; let z_m: Double; let reprojection_error_px: Double }
+    struct Dashboard: Decodable {
+        let capture_mode: String
+        let calibrated: Bool
+        let recording: Bool
+        let samples_recorded: Int
+        let sync_error_ms: Double?
+        let calibration_rms_px: Double?
+        let baseline_m: Double?
+        let measurement: Measurement?
+        let sources: [Source]
+        let error: String
+    }
+
+    @Published var dashboard: Dashboard?
+    @Published var connected = false
+    @Published var message = "Подключи монитор к Mac"
+    @Published var history: [String] = []
+    private var endpoint: URL?
+    private var token: String?
+
+    func connect(address: String, pin: String) async {
+        let host = address.trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = host.contains("://") ? host : "http://\(host)\(host.contains(":") ? "" : ":8765")"
+        guard let url = URL(string: value), pin.count == 6 else { message = "Проверь адрес Mac и шестизначный PIN"; return }
+        do {
+            var request = URLRequest(url: url.appendingPathComponent("api/monitor/pair"))
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["pin": pin])
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200,
+                  let object = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let key = object["token"] as? String else { throw URLError(.userAuthenticationRequired) }
+            endpoint = url; token = key; connected = true; message = "Монитор подключён"
+            await refresh()
+        } catch { connected = false; message = "Не удалось подключиться: \(error.localizedDescription)" }
+    }
+
+    func refresh() async {
+        guard let endpoint, let token else { return }
+        do {
+            var request = URLRequest(url: endpoint.appendingPathComponent("api/monitor/dashboard"))
+            request.setValue(token, forHTTPHeaderField: "X-Monitor-Token")
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.userAuthenticationRequired) }
+            dashboard = try JSONDecoder().decode(Dashboard.self, from: data)
+            connected = true
+            await loadHistory()
+        } catch { connected = false; message = "Связь с Mac потеряна" }
+    }
+
+    func setRecording(_ start: Bool) async {
+        guard let endpoint, let token else { return }
+        do {
+            var request = URLRequest(url: endpoint.appendingPathComponent("api/monitor/record/\(start ? "start" : "stop")"))
+            request.httpMethod = "POST"; request.setValue(token, forHTTPHeaderField: "X-Monitor-Token")
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.cannotParseResponse) }
+            message = start ? "Запись началась" : "Запись сохранена"
+            await refresh()
+        } catch { message = start ? "Для записи нужна действующая калибровка" : "Не удалось завершить запись" }
+    }
+
+    private func loadHistory() async {
+        guard let endpoint, let token else { return }
+        var request = URLRequest(url: endpoint.appendingPathComponent("api/monitor/history"))
+        request.setValue(token, forHTTPHeaderField: "X-Monitor-Token")
+        guard let (data, _) = try? await URLSession.shared.data(for: request),
+              let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { return }
+        history = items.compactMap { $0["name"] as? String }
+    }
+}
+
 struct CameraPreview: UIViewRepresentable {
     let session: AVCaptureSession
 
@@ -21,6 +103,7 @@ struct CameraPreview: UIViewRepresentable {
 
 struct ContentView: View {
     @EnvironmentObject private var streamer: CameraStreamer
+    @StateObject private var monitor = MonitorClient()
     @Environment(\.colorScheme) private var colorScheme
     @AppStorage("macAddress") private var macAddress = "192.168.1.2"
     @AppStorage("appearanceMode") private var appearanceMode = "system"
@@ -32,6 +115,22 @@ struct ContentView: View {
     private var panelStroke: Color { isDark ? .white.opacity(0.13) : .white.opacity(0.72) }
 
     var body: some View {
+        TabView {
+            monitorView.tabItem { Label("Обзор", systemImage: "chart.xyaxis.line") }
+            sensorView.tabItem { Label("Камера", systemImage: "camera.fill") }
+            recordsView.tabItem { Label("Записи", systemImage: "record.circle") }
+            profileView.tabItem { Label("Профиль", systemImage: "person.crop.circle") }
+        }
+        .tint(accent)
+        .task {
+            while !Task.isCancelled {
+                if monitor.connected { await monitor.refresh() }
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+            }
+        }
+    }
+
+    private var sensorView: some View {
         GeometryReader { geometry in
             let portrait = geometry.size.height >= geometry.size.width
             ZStack {
@@ -55,6 +154,77 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: UIDevice.orientationDidChangeNotification)) { _ in
             streamer.deviceOrientationChanged()
         }
+    }
+
+    private var monitorView: some View {
+        NavigationStack {
+            ZStack {
+                atmosphericBackground
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 18) {
+                        HStack { Text("PELENG").font(.system(size: 28, weight: .bold, design: .rounded)); Spacer(); statusPillMonitor }
+                        Text("Пространственная станция").font(.system(size: 30, weight: .bold)).tracking(-1)
+                        Text("Живое состояние Mac и подключённых камер.").foregroundStyle(secondaryText)
+                        if let dashboard = monitor.dashboard {
+                            monitorMetrics(dashboard)
+                            sourceCards(dashboard.sources)
+                            measurementCard(dashboard)
+                            Button { Task { await monitor.setRecording(!dashboard.recording) } } label: {
+                                Label(dashboard.recording ? "Завершить запись" : "Начать запись", systemImage: dashboard.recording ? "stop.fill" : "record.circle")
+                                    .frame(maxWidth: .infinity).frame(height: 52).fontWeight(.semibold)
+                            }.buttonStyle(.plain).foregroundStyle(.white).background(dashboard.recording ? Color.red : accent, in: Capsule())
+                        } else { monitorConnection }
+                        Text(monitor.message).font(.footnote).foregroundStyle(secondaryText)
+                    }.padding(18).padding(.bottom, 16)
+                }
+            }.navigationBarHidden(true)
+        }
+    }
+
+    private var statusPillMonitor: some View {
+        Label(monitor.connected ? "В СЕТИ" : "OFFLINE", systemImage: monitor.connected ? "wifi" : "wifi.slash")
+            .font(.system(size: 11, weight: .bold)).padding(.horizontal, 12).frame(height: 38)
+            .liquidGlass(shape: Capsule(), stroke: panelStroke, accent: accent)
+    }
+
+    private var monitorConnection: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Подключить Mac").font(.title3.bold())
+            field(title: "IP-адрес Mac", placeholder: "192.168.1.2", text: $macAddress, keyboard: .numbersAndPunctuation)
+            field(title: "PIN с экрана Mac", placeholder: "6 цифр", text: $pin, keyboard: .numberPad)
+            Button("Подключить монитор") { Task { await monitor.connect(address: macAddress, pin: pin) } }
+                .fontWeight(.semibold).frame(maxWidth: .infinity).frame(height: 50).foregroundStyle(.white).background(accent, in: Capsule())
+        }.padding(18).glassPanel(stroke: panelStroke, accent: accent)
+    }
+
+    private func monitorMetrics(_ value: MonitorClient.Dashboard) -> some View {
+        HStack(spacing: 0) {
+            metric("Камер", "\(value.sources.filter { $0.online }.count)/\(value.sources.count)")
+            Divider().frame(height: 45)
+            metric("Синхр.", value.sync_error_ms.map { String(format: "%.1f ms", $0) } ?? "—")
+            Divider().frame(height: 45)
+            metric("Калибр.", value.calibrated ? "Готова" : "Нужна")
+        }.padding(.vertical, 14).glassPanel(stroke: panelStroke, accent: accent)
+    }
+
+    private func sourceCards(_ sources: [MonitorClient.Source]) -> some View {
+        VStack(spacing: 10) { ForEach(sources) { source in HStack { Circle().fill(source.online ? .green : .orange).frame(width: 9); VStack(alignment: .leading) { Text(source.label).fontWeight(.semibold); Text(source.online ? "Живой поток" : "Нет сигнала").font(.caption).foregroundStyle(secondaryText) }; Spacer(); Text(String(format: "%.1f FPS", source.fps)).font(.system(.caption, design: .monospaced)) }.padding(15).glassPanel(stroke: panelStroke, accent: accent) } }
+    }
+
+    private func measurementCard(_ value: MonitorClient.Dashboard) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack { Text("Координаты XYZ").font(.title3.bold()); Spacer(); Text("\(value.samples_recorded) точек").font(.caption).foregroundStyle(secondaryText) }
+            HStack { metric("X · м", value.measurement.map { String(format: "%.3f", $0.x_m) } ?? "—"); metric("Y · м", value.measurement.map { String(format: "%.3f", $0.y_m) } ?? "—"); metric("Z · м", value.measurement.map { String(format: "%.3f", $0.z_m) } ?? "—") }
+            if !value.error.isEmpty { Text(value.error).font(.caption).foregroundStyle(secondaryText) }
+        }.padding(18).glassPanel(stroke: panelStroke, accent: accent)
+    }
+
+    private var recordsView: some View {
+        NavigationStack { ZStack { atmosphericBackground; ScrollView { VStack(alignment: .leading, spacing: 14) { Text("Записи").font(.largeTitle.bold()); Text("Сеансы, сохранённые на Mac").foregroundStyle(secondaryText); if monitor.history.isEmpty { VStack(spacing: 12) { Image(systemName: "record.circle").font(.system(size: 42)).foregroundStyle(accent); Text("Записей пока нет").font(.headline); Text("Подключись к Mac и заверши измерение.").font(.subheadline).foregroundStyle(secondaryText) }.frame(maxWidth: .infinity).padding(32).glassPanel(stroke: panelStroke, accent: accent) } else { ForEach(monitor.history, id: \.self) { name in Label(name, systemImage: "tablecells").padding(16).frame(maxWidth: .infinity, alignment: .leading).glassPanel(stroke: panelStroke, accent: accent) } } }.padding(18) } }.navigationBarHidden(true) }
+    }
+
+    private var profileView: some View {
+        NavigationStack { ZStack { atmosphericBackground; VStack(spacing: 18) { Spacer(); Image(systemName: "person.crop.circle.fill").font(.system(size: 82)).foregroundStyle(accent); Text("Оператор PELENG").font(.title2.bold()); Text("Локальный профиль\nДанные камер не отправляются в облако").multilineTextAlignment(.center).foregroundStyle(secondaryText); appearanceMenu; Spacer() }.padding(24) }.navigationBarHidden(true) }
     }
 
     private var atmosphericBackground: some View {
